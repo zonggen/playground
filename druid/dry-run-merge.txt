@@ -1,0 +1,1024 @@
+NAME: abai-test
+LAST DEPLOYED: Thu Sep 16 11:56:22 2021
+NAMESPACE: default
+STATUS: pending-install
+REVISION: 1
+TEST SUITE: None
+HOOKS:
+MANIFEST:
+---
+# Source: druid/charts/zookeeper/templates/poddisruptionbudget.yaml
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: abai-test-zookeeper
+  labels:
+    app: zookeeper
+    chart: zookeeper-2.1.4
+    release: abai-test
+    heritage: Helm
+    component: server
+spec:
+  selector:
+    matchLabels:
+      app: zookeeper
+      release: abai-test
+      component: server
+  maxUnavailable: 1
+---
+# Source: druid/charts/postgresql/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: abai-test-postgresql
+  labels:
+    app: postgresql
+    chart: postgresql-8.6.4
+    release: "abai-test"
+    heritage: "Helm"
+type: Opaque
+data:
+  postgresql-password: "ZHJ1aWQ="
+---
+# Source: druid/charts/zookeeper/templates/config-script.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: abai-test-zookeeper
+  labels:
+    app: zookeeper
+    chart: zookeeper-2.1.4
+    release: abai-test
+    heritage: Helm
+    component: server
+data:
+    ok: |
+      #!/bin/sh
+      zkServer.sh status
+
+    ready: |
+      #!/bin/sh
+      echo ruok | nc 127.0.0.1 ${1:-2181}
+
+    run: |
+      #!/bin/bash
+
+      set -a
+      ROOT=$(echo /apache-zookeeper-*)
+
+      ZK_USER=${ZK_USER:-"zookeeper"}
+      ZK_LOG_LEVEL=${ZK_LOG_LEVEL:-"INFO"}
+      ZK_DATA_DIR=${ZK_DATA_DIR:-"/data"}
+      ZK_DATA_LOG_DIR=${ZK_DATA_LOG_DIR:-"/data/log"}
+      ZK_CONF_DIR=${ZK_CONF_DIR:-"/conf"}
+      ZK_CLIENT_PORT=${ZK_CLIENT_PORT:-2181}
+      ZK_SERVER_PORT=${ZK_SERVER_PORT:-2888}
+      ZK_ELECTION_PORT=${ZK_ELECTION_PORT:-3888}
+      ZK_TICK_TIME=${ZK_TICK_TIME:-2000}
+      ZK_INIT_LIMIT=${ZK_INIT_LIMIT:-10}
+      ZK_SYNC_LIMIT=${ZK_SYNC_LIMIT:-5}
+      ZK_HEAP_SIZE=${ZK_HEAP_SIZE:-2G}
+      ZK_MAX_CLIENT_CNXNS=${ZK_MAX_CLIENT_CNXNS:-60}
+      ZK_MIN_SESSION_TIMEOUT=${ZK_MIN_SESSION_TIMEOUT:- $((ZK_TICK_TIME*2))}
+      ZK_MAX_SESSION_TIMEOUT=${ZK_MAX_SESSION_TIMEOUT:- $((ZK_TICK_TIME*20))}
+      ZK_SNAP_RETAIN_COUNT=${ZK_SNAP_RETAIN_COUNT:-3}
+      ZK_PURGE_INTERVAL=${ZK_PURGE_INTERVAL:-0}
+      ID_FILE="$ZK_DATA_DIR/myid"
+      ZK_CONFIG_FILE="$ZK_CONF_DIR/zoo.cfg"
+      LOG4J_PROPERTIES="$ZK_CONF_DIR/log4j.properties"
+      HOST=$(hostname)
+      DOMAIN=`hostname -d`
+      JVMFLAGS="-Xmx$ZK_HEAP_SIZE -Xms$ZK_HEAP_SIZE"
+
+      APPJAR=$(echo $ROOT/*jar)
+      CLASSPATH="${ROOT}/lib/*:${APPJAR}:${ZK_CONF_DIR}:"
+
+      if [[ $HOST =~ (.*)-([0-9]+)$ ]]; then
+          NAME=${BASH_REMATCH[1]}
+          ORD=${BASH_REMATCH[2]}
+          MY_ID=$((ORD+1))
+      else
+          echo "Failed to extract ordinal from hostname $HOST"
+          exit 1
+      fi
+
+      mkdir -p $ZK_DATA_DIR
+      mkdir -p $ZK_DATA_LOG_DIR
+      echo $MY_ID >> $ID_FILE
+
+      echo "clientPort=$ZK_CLIENT_PORT" >> $ZK_CONFIG_FILE
+      echo "dataDir=$ZK_DATA_DIR" >> $ZK_CONFIG_FILE
+      echo "dataLogDir=$ZK_DATA_LOG_DIR" >> $ZK_CONFIG_FILE
+      echo "tickTime=$ZK_TICK_TIME" >> $ZK_CONFIG_FILE
+      echo "initLimit=$ZK_INIT_LIMIT" >> $ZK_CONFIG_FILE
+      echo "syncLimit=$ZK_SYNC_LIMIT" >> $ZK_CONFIG_FILE
+      echo "maxClientCnxns=$ZK_MAX_CLIENT_CNXNS" >> $ZK_CONFIG_FILE
+      echo "minSessionTimeout=$ZK_MIN_SESSION_TIMEOUT" >> $ZK_CONFIG_FILE
+      echo "maxSessionTimeout=$ZK_MAX_SESSION_TIMEOUT" >> $ZK_CONFIG_FILE
+      echo "autopurge.snapRetainCount=$ZK_SNAP_RETAIN_COUNT" >> $ZK_CONFIG_FILE
+      echo "autopurge.purgeInterval=$ZK_PURGE_INTERVAL" >> $ZK_CONFIG_FILE
+      echo "4lw.commands.whitelist=*" >> $ZK_CONFIG_FILE
+
+      for (( i=1; i<=$ZK_REPLICAS; i++ ))
+      do
+          echo "server.$i=$NAME-$((i-1)).$DOMAIN:$ZK_SERVER_PORT:$ZK_ELECTION_PORT" >> $ZK_CONFIG_FILE
+      done
+
+      rm -f $LOG4J_PROPERTIES
+
+      echo "zookeeper.root.logger=$ZK_LOG_LEVEL, CONSOLE" >> $LOG4J_PROPERTIES
+      echo "zookeeper.console.threshold=$ZK_LOG_LEVEL" >> $LOG4J_PROPERTIES
+      echo "zookeeper.log.threshold=$ZK_LOG_LEVEL" >> $LOG4J_PROPERTIES
+      echo "zookeeper.log.dir=$ZK_DATA_LOG_DIR" >> $LOG4J_PROPERTIES
+      echo "zookeeper.log.file=zookeeper.log" >> $LOG4J_PROPERTIES
+      echo "zookeeper.log.maxfilesize=256MB" >> $LOG4J_PROPERTIES
+      echo "zookeeper.log.maxbackupindex=10" >> $LOG4J_PROPERTIES
+      echo "zookeeper.tracelog.dir=$ZK_DATA_LOG_DIR" >> $LOG4J_PROPERTIES
+      echo "zookeeper.tracelog.file=zookeeper_trace.log" >> $LOG4J_PROPERTIES
+      echo "log4j.rootLogger=\${zookeeper.root.logger}" >> $LOG4J_PROPERTIES
+      echo "log4j.appender.CONSOLE=org.apache.log4j.ConsoleAppender" >> $LOG4J_PROPERTIES
+      echo "log4j.appender.CONSOLE.Threshold=\${zookeeper.console.threshold}" >> $LOG4J_PROPERTIES
+      echo "log4j.appender.CONSOLE.layout=org.apache.log4j.PatternLayout" >> $LOG4J_PROPERTIES
+      echo "log4j.appender.CONSOLE.layout.ConversionPattern=%d{ISO8601} [myid:%X{myid}] - %-5p [%t:%C{1}@%L] - %m%n" >> $LOG4J_PROPERTIES
+
+      if [ -n "$JMXDISABLE" ]
+      then
+          MAIN=org.apache.zookeeper.server.quorum.QuorumPeerMain
+      else
+          MAIN="-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=$JMXPORT -Dcom.sun.management.jmxremote.authenticate=$JMXAUTH -Dcom.sun.management.jmxremote.ssl=$JMXSSL -Dzookeeper.jmx.log4j.disable=$JMXLOG4J org.apache.zookeeper.server.quorum.QuorumPeerMain"
+      fi
+
+      set -x
+      exec java -cp "$CLASSPATH" $JVMFLAGS $MAIN $ZK_CONFIG_FILE
+---
+# Source: druid/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: druid
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    release: abai-test
+    heritage: Helm
+data:
+  DRUID_USE_CONTAINER_IP: "true"
+  druid_emitter: noop
+  druid_emitter_http_recipientBaseUrl: http://druid_exporter_url:druid_exporter_port/druid
+  druid_emitter_logging_logLevel: debug
+  druid_extensions_loadList: '["druid-histogram", "druid-datasketches", "druid-lookups-cached-global",
+    "postgresql-metadata-storage"]'
+  druid_indexer_logs_directory: /opt/data/indexing-logs
+  druid_indexer_logs_type: file
+  druid_metadata_storage_connector_connectURI: jdbc:postgresql://postgres:5432/druid
+  druid_metadata_storage_connector_password: druid
+  druid_metadata_storage_connector_user: druid
+  druid_metadata_storage_type: postgresql
+  druid_storage_type: local
+  druid_zk_service_host: abai-test-zookeeper-headless:2181
+  druid_metadata_storage_type: postgresql
+  druid_metadata_storage_connector_connectURI: jdbc:postgresql://abai-test-postgresql:5432/druid
+  druid_metadata_storage_connector_user: druid
+  druid_metadata_storage_connector_password: druid
+---
+# Source: druid/charts/postgresql/templates/svc-headless.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-postgresql-headless
+  labels:
+    app: postgresql
+    chart: postgresql-8.6.4
+    release: "abai-test"
+    heritage: "Helm"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: tcp-postgresql
+      port: 5432
+      targetPort: tcp-postgresql
+  selector:
+    app: postgresql
+    release: "abai-test"
+---
+# Source: druid/charts/postgresql/templates/svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-postgresql
+  labels:
+    app: postgresql
+    chart: postgresql-8.6.4
+    release: "abai-test"
+    heritage: "Helm"
+spec:
+  type: ClusterIP
+  ports:
+    - name: tcp-postgresql
+      port: 5432
+      targetPort: tcp-postgresql
+  selector:
+    app: postgresql
+    release: "abai-test"
+    role: master
+---
+# Source: druid/charts/zookeeper/templates/service-headless.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-zookeeper-headless
+  labels:
+    app: zookeeper
+    chart: zookeeper-2.1.4
+    release: abai-test
+    heritage: Helm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: client
+      port: 2181
+      targetPort: client
+      protocol: TCP
+    - name: election
+      port: 3888
+      targetPort: election
+      protocol: TCP
+    - name: server
+      port: 2888
+      targetPort: server
+      protocol: TCP
+  selector:
+    app: zookeeper
+    release: abai-test
+---
+# Source: druid/charts/zookeeper/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-zookeeper
+  labels:
+    app: zookeeper
+    chart: zookeeper-2.1.4
+    release: abai-test
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - name: client
+      port: 2181
+      protocol: TCP
+      targetPort: client
+  selector:
+    app: zookeeper
+    release: abai-test
+---
+# Source: druid/templates/broker/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-druid-broker
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: broker
+    release: abai-test
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8082
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: druid
+    release: abai-test
+    component: broker
+---
+# Source: druid/templates/coordinator/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-druid-coordinator
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: coordinator
+    release: abai-test
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8081
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: druid
+    release: abai-test
+    component: coordinator
+---
+# Source: druid/templates/historical/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-druid-historical
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: historical
+    release: abai-test
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8083
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: druid
+    release: abai-test
+    component: historical
+---
+# Source: druid/templates/middleManager/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-druid-middle-manager
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: middle-manager
+    release: abai-test
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8091
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: druid
+    release: abai-test
+    component: middle-manager
+---
+# Source: druid/templates/router/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: abai-test-druid-router
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: router
+    release: abai-test
+    heritage: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8888
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: druid
+    release: abai-test
+    component: router
+---
+# Source: druid/templates/broker/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: abai-test-druid-broker
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: broker
+    release: abai-test
+    heritage: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: druid
+      release: abai-test
+      component: broker
+  template:
+    metadata:
+      labels:
+        app: druid
+        release: abai-test
+        component: broker
+    spec:
+      containers:
+        - name: druid
+          image: "apache/druid:0.19.0"
+          imagePullPolicy: IfNotPresent
+          args: [ "broker" ]
+          env:
+          - name: DRUID_MAXDIRECTMEMORYSIZE
+            value: "10500m"
+          - name: DRUID_XMS
+            value: "12g"
+          - name: DRUID_XMX
+            value: "12g"
+          - name: druid_s3_disableChunkedEncoding
+            value: "true"
+          - name: druid_s3_enablePathStyleAccess
+            value: "true"
+          - name: druid_storage_type
+            value: "s3"
+          envFrom:
+            - configMapRef:
+                name: druid
+          ports:
+            - name: http
+              containerPort: 8082
+              protocol: TCP
+          livenessProbe:
+            initialDelaySeconds: 60
+            httpGet:
+              path: /status/health
+              port: 8082
+          readinessProbe:
+            initialDelaySeconds: 60
+            httpGet:
+              path: /status/health
+              port: 8082
+          resources:
+            {}
+---
+# Source: druid/templates/coordinator/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: abai-test-druid-coordinator
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: coordinator
+    release: abai-test
+    heritage: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: druid
+      release: abai-test
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: druid
+        release: abai-test
+        component: coordinator
+    spec:
+      containers:
+        - name: druid
+          image: "apache/druid:0.19.0"
+          imagePullPolicy: IfNotPresent
+          args: [ "coordinator" ]
+          env:
+          - name: DRUID_MAXDIRECTMEMORYSIZE
+            value: "10500m"
+          - name: DRUID_XMS
+            value: "12g"
+          - name: DRUID_XMX
+            value: "12g"
+          - name: druid_s3_disableChunkedEncoding
+            value: "true"
+          - name: druid_s3_enablePathStyleAccess
+            value: "true"
+          - name: druid_storage_type
+            value: "s3"
+          envFrom:
+            - configMapRef:
+                name: druid
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            initialDelaySeconds: 60
+            httpGet:
+              path: /status/health
+              port: 8081
+          readinessProbe:
+            initialDelaySeconds: 60
+            httpGet:
+              path: /status/health
+              port: 8081
+          resources:
+            {}
+          volumeMounts:
+      volumes:
+---
+# Source: druid/templates/router/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: abai-test-druid-router
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: router
+    release: abai-test
+    heritage: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: druid
+      release: abai-test
+      component: router
+  template:
+    metadata:
+      labels:
+        app: druid
+        release: abai-test
+        component: router
+    spec:
+      containers:
+        - name: druid
+          image: "apache/druid:0.19.0"
+          imagePullPolicy: IfNotPresent
+          args: [ "router" ]
+          env:
+          - name: DRUID_MAXDIRECTMEMORYSIZE
+            value: "10500m"
+          - name: DRUID_XMS
+            value: "12g"
+          - name: DRUID_XMX
+            value: "12g"
+          - name: druid_s3_disableChunkedEncoding
+            value: "true"
+          - name: druid_s3_enablePathStyleAccess
+            value: "true"
+          - name: druid_storage_type
+            value: "s3"
+          envFrom:
+            - configMapRef:
+                name: druid 
+          ports:
+            - name: http
+              containerPort: 8888
+              protocol: TCP
+          livenessProbe:
+            initialDelaySeconds: 60
+            httpGet:
+              path: /status/health
+              port: 8888
+          readinessProbe:
+            initialDelaySeconds: 60
+            httpGet:
+              path: /status/health
+              port: 8888
+          resources:
+            {}
+---
+# Source: druid/charts/postgresql/templates/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: abai-test-postgresql
+  labels:
+    app: postgresql
+    chart: postgresql-8.6.4
+    release: "abai-test"
+    heritage: "Helm"
+spec:
+  serviceName: abai-test-postgresql-headless
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: postgresql
+      release: "abai-test"
+      role: master
+  template:
+    metadata:
+      name: abai-test-postgresql
+      labels:
+        app: postgresql
+        chart: postgresql-8.6.4
+        release: "abai-test"
+        heritage: "Helm"
+        role: master
+    spec:      
+      securityContext:
+        fsGroup: 1001
+      initContainers:
+        # - name: do-something
+        #   image: busybox
+        #   command: ['do', 'something']
+        
+      containers:
+        - name: abai-test-postgresql
+          image: docker.io/bitnami/postgresql:11.7.0-debian-10-r9
+          imagePullPolicy: "IfNotPresent"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            runAsUser: 1001
+          env:
+            - name: BITNAMI_DEBUG
+              value: "false"
+            - name: POSTGRESQL_PORT_NUMBER
+              value: "5432"
+            - name: POSTGRESQL_VOLUME_DIR
+              value: "/bitnami/postgresql"
+            - name: PGDATA
+              value: "/bitnami/postgresql/data"
+            - name: POSTGRES_USER
+              value: "druid"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: abai-test-postgresql
+                  key: postgresql-password
+            - name: POSTGRES_DB
+              value: "druid"
+            - name: POSTGRESQL_ENABLE_LDAP
+              value: "no"
+          ports:
+            - name: tcp-postgresql
+              containerPort: 5432
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exec pg_isready -U "druid" -d "druid" -h 127.0.0.1 -p 5432
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - -e
+                - |
+                  exec pg_isready -U "druid" -d "druid" -h 127.0.0.1 -p 5432
+                  [ -f /opt/bitnami/postgresql/tmp/.initialized ] || [ -f /bitnami/postgresql/.initialized ]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 6
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+            - name: data
+              mountPath: /bitnami/postgresql
+              subPath: 
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+---
+# Source: druid/charts/zookeeper/templates/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: abai-test-zookeeper
+  labels:
+    app: zookeeper
+    chart: zookeeper-2.1.4
+    release: abai-test
+    heritage: Helm
+    component: server
+spec:
+  serviceName: abai-test-zookeeper-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zookeeper
+      release: abai-test
+      component: server
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+        release: abai-test
+        component: server
+    spec:
+      terminationGracePeriodSeconds: 1800
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      containers:
+
+        - name: zookeeper
+          image: "zookeeper:3.5.5"
+          imagePullPolicy: IfNotPresent
+          command: 
+             - "/bin/bash"
+             - "-xec"
+             - "/config-scripts/run"
+          ports:
+            - name: client
+              containerPort: 2181
+              protocol: TCP
+            - name: election
+              containerPort: 3888
+              protocol: TCP
+            - name: server
+              containerPort: 2888
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - /config-scripts/ok
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 2
+            successThreshold: 1
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - /config-scripts/ready
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 2
+            successThreshold: 1
+          env:
+            - name: ZK_REPLICAS
+              value: "3"
+            - name: JMXAUTH
+              value: "false"
+            - name: JMXDISABLE
+              value: "false"
+            - name: JMXPORT
+              value: "1099"
+            - name: JMXSSL
+              value: "false"
+            - name: ZK_HEAP_SIZE
+              value: "512M"
+            - name: ZK_SYNC_LIMIT
+              value: "10"
+            - name: ZK_TICK_TIME
+              value: "2000"
+            - name: ZOO_AUTOPURGE_PURGEINTERVAL
+              value: "0"
+            - name: ZOO_AUTOPURGE_SNAPRETAINCOUNT
+              value: "3"
+            - name: ZOO_INIT_LIMIT
+              value: "5"
+            - name: ZOO_MAX_CLIENT_CNXNS
+              value: "60"
+            - name: ZOO_PORT
+              value: "2181"
+            - name: ZOO_STANDALONE_ENABLED
+              value: "false"
+            - name: ZOO_TICK_TIME
+              value: "2000"
+          resources:
+            {}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /config-scripts
+      volumes:
+        - name: config
+          configMap:
+            name: abai-test-zookeeper
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "5Gi"
+---
+# Source: druid/templates/historical/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: historical
+    heritage: Helm
+    release: abai-test
+  name: abai-test-druid-historical
+spec:
+  serviceName: abai-test-druid-historical
+  replicas: 1
+  selector:
+    matchLabels:
+      app: druid
+      release: abai-test
+      component: historical
+  template:
+    metadata:
+      labels:
+        app: druid
+        component: historical
+        release: abai-test
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: "druid"
+                  release: "abai-test"
+                  component: "historical"
+      securityContext:
+        fsGroup: 1000
+      containers:
+      - name: druid
+        args: [ "historical" ]
+        env:
+          - name: DRUID_MAXDIRECTMEMORYSIZE
+            value: "10500m"
+          - name: DRUID_XMS
+            value: "12g"
+          - name: DRUID_XMX
+            value: "12g"
+          - name: druid_s3_disableChunkedEncoding
+            value: "true"
+          - name: druid_s3_enablePathStyleAccess
+            value: "true"
+          - name: druid_storage_type
+            value: "s3"
+        envFrom:
+          - configMapRef:
+              name: druid
+        resources:
+            {}
+        livenessProbe:
+          initialDelaySeconds: 60
+          httpGet:
+            path: /status/health
+            port: 8083
+        readinessProbe:
+          initialDelaySeconds: 60
+          httpGet:
+            path: /status/health
+            port: 8083
+        image: "apache/druid:0.19.0"
+        imagePullPolicy: "IfNotPresent"
+        ports:
+        - containerPort: 8083
+          name: http
+        volumeMounts:
+        - mountPath: /opt/druid/var/druid/
+          name: data
+      volumes:
+  updateStrategy:
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+        - "ReadWriteOnce"
+      resources:
+        requests:
+          storage: "4Gi"
+---
+# Source: druid/templates/middleManager/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: druid
+    chart: druid-0.3.0
+    component: middle-manager
+    heritage: Helm
+    release: abai-test
+  name: abai-test-druid-middle-manager
+spec:
+  serviceName: abai-test-druid-middle-manager
+  replicas: 1
+  selector:
+    matchLabels:
+      app: druid
+      release: abai-test
+      component: middle-manager
+  template:
+    metadata:
+      labels:
+        app: druid
+        component: middle-manager
+        release: abai-test
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: "druid"
+                  release: "abai-test"
+                  component: "middle-manager"
+      securityContext:
+        fsGroup: 1000
+      containers:
+      - name: druid
+        args: [ "middleManager" ]
+        env:
+        - name: DRUID_MAXDIRECTMEMORYSIZE
+          value: "10500m"
+        - name: DRUID_XMS
+          value: "12g"
+        - name: DRUID_XMX
+          value: "12g"
+        - name: druid_s3_disableChunkedEncoding
+          value: "true"
+        - name: druid_s3_enablePathStyleAccess
+          value: "true"
+        - name: druid_storage_type
+          value: "s3"
+        envFrom:
+          - configMapRef:
+              name: druid 
+        resources:
+            {}
+        livenessProbe:
+          initialDelaySeconds: 60
+          httpGet:
+            path: /status/health
+            port: 8091
+        readinessProbe:
+          initialDelaySeconds: 60
+          httpGet:
+            path: /status/health
+            port: 8091
+        image: "apache/druid:0.19.0"
+        imagePullPolicy: "IfNotPresent"
+        ports:
+        - containerPort: 8091
+          name: http
+        volumeMounts:
+        - mountPath: /opt/druid/var/druid/
+          name: data
+      volumes:
+  updateStrategy:
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+        - "ReadWriteOnce"
+      resources:
+        requests:
+          storage: "4Gi"
+
+NOTES:
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+1. Get the router URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace default -l "app=druid,release=abai-test" -o jsonpath="{.items[0].metadata.name}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl port-forward $POD_NAME 8080:8888
